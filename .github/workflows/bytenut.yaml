@@ -1,0 +1,79 @@
+name: Bytenut 续期
+
+on:
+  schedule:
+    - cron: '0 */1 * * *' # 每小时自动运行
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  run_renewal:
+    name: 运行续期脚本
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 拉取仓库
+        uses: actions/checkout@v4
+
+      - name: 安装Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: 安装依赖项
+        run: |
+          python -m pip install --upgrade pip
+          pip install seleniumbase requests
+          seleniumbase install chromedriver
+
+      - name: 安装并启动代理 (xts)
+        id: proxy
+        run: |
+          echo "[INFO] 下载 xts..."
+          wget -qO xts https://github.com/fbrav530/one-myweb64/raw/refs/heads/main/app/xts
+          chmod +x xts
+          
+          echo "[INFO] 启动 xts 代理..."
+          # 在后台运行 xts 并将日志输出到 xts.log，使用 10800 端口
+          ./xts -f wss://by.xyxx.pp.ua/bytenut -token sliao530 -l socks5://0.0.0.0:10800 > xts.log 2>&1 &
+          sleep 5
+          
+          echo "[INFO] 测试代理连接..."
+          for i in 1 2 3 4 5; do
+            if curl -x socks5://127.0.0.1:10800 -s --max-time 15 https://api.ipify.org > /dev/null 2>&1; then
+              echo "proxy_server=socks5://127.0.0.1:10800" >> $GITHUB_OUTPUT
+              echo "use_proxy=true" >> $GITHUB_OUTPUT
+              echo "[INFO] ✅ 代理连接成功"
+              exit 0
+            fi
+            echo "[WARN] 尝试 $i/5..."
+            sleep 3
+          done
+          
+          echo "[ERROR] ❌ 代理连接失败，回退直连"
+          echo "use_proxy=false" >> $GITHUB_OUTPUT
+          echo "proxy_server=" >> $GITHUB_OUTPUT
+
+      - name: 运行续期脚本
+        env:
+          BYTENUT: ${{ secrets.BYTENUT }}
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+          # 将成功启动的代理地址传递给 Python 脚本
+          PROXY: ${{ steps.proxy.outputs.proxy_server }}
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq xvfb
+          xvfb-run -a python3 main.py
+
+      - name: 清理历史
+        if: always()
+        uses: Mattraks/delete-workflow-runs@v2
+        with:
+          token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          delete_workflow_pattern: ${{ github.workflow }}
+          retain_days: 0
+          keep_minimum_runs: 2
