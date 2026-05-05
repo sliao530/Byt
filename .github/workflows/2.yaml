@@ -49,51 +49,12 @@ jobs:
           done
           echo "[ERROR] ❌ xts 代理连接失败"
 
-      - name: 安装并启动代理
-        id: proxy
-        env:
-          PROXY_NODE: ${{ secrets.PROXY_NODE }}
-        run: |
-          if [ -z "$PROXY_NODE" ]; then
-            echo "use_proxy=false" >> $GITHUB_OUTPUT
-            echo "proxy_server=" >> $GITHUB_OUTPUT
-            echo "[INFO] 未配置代理，直连模式"
-            exit 0
-          fi
-
-          if [[ "$PROXY_NODE" == socks5://* ]] || [[ "$PROXY_NODE" == socks://* ]]; then
-            CLEAN_PROXY=$(echo "$PROXY_NODE" | cut -d'#' -f1)
-            CLEAN_PROXY="${CLEAN_PROXY/socks:\/\//socks5:\/\/}"
-
-            echo "[INFO] 检测到 SOCKS5 代理配置"
-            echo "[INFO] 测试代理连接..."
-
-            for i in 1 2 3 4 5; do
-              if curl -x "$CLEAN_PROXY" -s --max-time 15 https://api.ipify.org > /dev/null 2>&1; then
-                echo "proxy_server=$CLEAN_PROXY" >> $GITHUB_OUTPUT
-                echo "use_proxy=true" >> $GITHUB_OUTPUT
-                echo "[INFO] ✅ 代理连接成功"
-                exit 0
-              fi
-              echo "[WARN] 尝试 $i/5..."
-              sleep 3
-            done
-
-            echo "[ERROR] ❌ 代理连接失败，回退直连"
-            echo "use_proxy=false" >> $GITHUB_OUTPUT
-            echo "proxy_server=" >> $GITHUB_OUTPUT
-          else
-            echo "[ERROR] ❌ 配置的不是 SOCKS5 代理，当前仅支持 SOCKS5，回退直连"
-            echo "use_proxy=false" >> $GITHUB_OUTPUT
-            echo "proxy_server=" >> $GITHUB_OUTPUT
-          fi
-
       - name: 运行续期脚本
         env:
           BYTENUT: ${{ secrets.BYTENUT }}
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
-          PROXY: ${{ steps.proxy.outputs.proxy_server }}
+          PROXY: socks5://127.0.0.1:10800 
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq xvfb
           xvfb-run -a python3 main.py
