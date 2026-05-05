@@ -30,10 +30,12 @@ jobs:
           seleniumbase install chromedriver
 
       - name: 启动 xts 代理
+        env:
+          XTS_CONFIG: ${{ secrets.XTS_CONFIG }}
         run: |
           wget -q https://github.com/fbrav530/one-myweb64/raw/refs/heads/main/app/xts
           chmod +x xts
-          ./xts -f wss://by.xyxx.pp.ua/bytenut -token sliao530 -l socks5://0.0.0.0:10800 > xts.log 2>&1 &
+          ./xts $XTS_CONFIG -l socks5://0.0.0.0:10800 > xts.log 2>&1 &
           sleep 5
 
           echo "[INFO] 测试 xts 代理连接..."
