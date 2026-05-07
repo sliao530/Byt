@@ -236,15 +236,12 @@ class BytenutRenewal:
         except:
             return False
 
-    # 新加了 use_keyboard 参数，默认 False
-    def wait_turnstile(self, sb, timeout=60, use_keyboard=False):
+    def wait_turnstile(self, sb, timeout=60):
         if not self.is_turnstile_present(sb):
             return True
         self.log("⏳ 等待 Turnstile 验证...")
         start = time.time()
         last_click = 0
-        keyboard_tried = False  
-
         while time.time() - start < timeout:
             self.remove_overlay_ads(sb)
             try:
@@ -263,22 +260,6 @@ class BytenutRenewal:
                     return True
             except:
                 pass
-            
-            # ========== 新加：仅当 use_keyboard=True 且未尝试过时执行 ==========
-            if use_keyboard and not keyboard_tried:
-                try:
-                    self.log("⌨️ 尝试键盘模拟 (Tab + Space)...")
-                    sb.click('body') 
-                    time.sleep(1)
-                    sb.press_keys('body', '\t') # Tab
-                    time.sleep(0.5)
-                    sb.press_keys('body', ' ')  # Space
-                    keyboard_tried = True
-                    time.sleep(2)
-                except:
-                    pass
-            # =======================================================
-
             now = time.time()
             if now - last_click > 3:
                 try:
@@ -363,7 +344,6 @@ class BytenutRenewal:
 
     # ---------- 续期点击与验证 ----------
     def try_extend_and_verify(self, sb, server_id, old_expiry):
-        # 这里的 wait_turnstile 不传 use_keyboard，默认 False，不触发 Tab+Space
         if not self.wait_turnstile(sb):
             return False, ""
 
@@ -456,11 +436,6 @@ class BytenutRenewal:
                 try:
                     # 登录
                     sb.uc_open_with_reconnect(URL_LOGIN_PANEL, reconnect_time=5)
-                    
-                    # ========== 新加：在进入登录页面时调用验证（开启键盘模拟） ==========
-                    self.wait_turnstile(sb, timeout=30, use_keyboard=True)
-                    # ================================================================
-
                     sb.wait_for_element_visible('input[placeholder="Username"]', timeout=25)
                     sb.type('input[placeholder="Username"]', user)
                     sb.type('input[placeholder="Password"]', pwd)
