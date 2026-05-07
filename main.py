@@ -17,8 +17,6 @@ if "DISPLAY" not in os.environ:
             pass
 
 from seleniumbase import SB
-from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.common.action_chains import ActionChains
 
 # ================= 配置区域 =================
 PROXY = os.getenv("PROXY") or None
@@ -436,11 +434,11 @@ class BytenutRenewal:
                 proxy=PROXY
             ) as sb:
                 try:
-# 登录
+                    # 登录
                     sb.uc_open_with_reconnect(URL_LOGIN_PANEL, reconnect_time=5)
                     
-                    # ================= 优化版：动态判断 CF 盾 =================
-                    self.log("⏳ 正在检查页面状态...")
+                    # ================= 方案二：动态判断 + GUI 点击 =================
+                    self.log("⏳ 正在检查页面状态 (寻找登录框或 CF 盾)...")
                     
                     # 循环检测 5 次，每次 1 秒
                     cf_detected = False
@@ -457,25 +455,32 @@ class BytenutRenewal:
                         time.sleep(1)
                     
                     if cf_detected:
-                        self.log("🛡️ 检测到 CF 盾，执行 [Tab x2 + Space] 解锁...")
-                        actions = ActionChains(sb.driver)
-                        actions.send_keys(Keys.TAB) \
-                               .pause(0.5) \
-                               .send_keys(Keys.SPACE) \
-                               .perform()
-                        
-                        # 给验证动画和页面跳转留点时间
-                        time.sleep(6)
+                        self.log("🛡️ 检测到 CF 盾，调用 SeleniumBase 原生 GUI 点击...")
+                        try:
+                            # 确保 CF 盾在视口中央，防止点击错位
+                            sb.execute_script("""
+                                var elem = document.querySelector('.cf-turnstile') || document.querySelector('iframe[src*="challenges.cloudflare"]');
+                                if(elem) elem.scrollIntoView({block: 'center'});
+                            """)
+                            time.sleep(1) # 给页面平滑滚动留出时间
+                            
+                            # 触发系统的真实鼠标点击
+                            sb.uc_gui_click_captcha()
+                            
+                            self.log("🖱️ 原生 GUI 点击已执行，等待验证通过...")
+                            time.sleep(6) # 给验证动画和页面跳转留点时间
+                        except Exception as e:
+                            self.log(f"⚠️ GUI 点击出现异常: {e}")
                     else:
                         self.log("✅ 未检测到 CF 盾 (或已直接放行)")
-                    # ============================================================
+                    # ===============================================================
                     
-                    # 继续原有的登录输入流程
                     sb.wait_for_element_visible('input[placeholder="Username"]', timeout=25)
                     sb.type('input[placeholder="Username"]', user)
                     sb.type('input[placeholder="Password"]', pwd)
                     sb.click('//button[contains(., "Sign In")]')
                     time.sleep(5)
+                    
                     if "/auth/login" in sb.get_current_url():
                         err = ""
                         try:
