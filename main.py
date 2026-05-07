@@ -434,19 +434,41 @@ class BytenutRenewal:
                 proxy=PROXY
             ) as sb:
                 try:
-                    # 登录
+# 登录
                     sb.uc_open_with_reconnect(URL_LOGIN_PANEL, reconnect_time=5)
                     
-                    # ================= 复用续期时的 CF 盾处理逻辑 =================
-                    self.log("⏳ 等待页面加载，检查登录页 CF 盾...")
-                    time.sleep(3)  # 给 CF 盾 iframe 留出初始加载时间
+                    # ================= 优化版：动态判断 CF 盾 =================
+                    self.log("⏳ 正在检查页面状态...")
                     
-                    # 直接调用原代码中极其完善的 wait_turnstile 函数
-                    # 它内部自带了判断有无盾、滚动居中、循环点击和判断是否通过的完整逻辑
-                    self.wait_turnstile(sb, timeout=45)
-                    # ==============================================================
-
-                    # 无论是否有盾，或者盾通过后，继续执行原有的输入账号密码逻辑
+                    # 循环检测 5 次，每次 1 秒
+                    cf_detected = False
+                    for _ in range(5):
+                        # 1. 如果直接看到了用户名输入框，说明没有 CF 盾，直接跳出
+                        if sb.is_element_visible('input[placeholder="Username"]'):
+                            break
+                        
+                        # 2. 如果检测到了 CF 盾的特征元素
+                        if self.is_turnstile_present(sb):
+                            cf_detected = True
+                            break
+                            
+                        time.sleep(1)
+                    
+                    if cf_detected:
+                        self.log("🛡️ 检测到 CF 盾，执行 [Tab + Space] 解锁...")
+                        actions = ActionChains(sb.driver)
+                        actions.send_keys(Keys.TAB) \
+                               .pause(0.5) \
+                               .send_keys(Keys.SPACE) \
+                               .perform()
+                        
+                        # 给验证动画和页面跳转留点时间
+                        time.sleep(6)
+                    else:
+                        self.log("✅ 未检测到 CF 盾 (或已直接放行)")
+                    # ============================================================
+                    
+                    # 继续原有的登录输入流程
                     sb.wait_for_element_visible('input[placeholder="Username"]', timeout=25)
                     sb.type('input[placeholder="Username"]', user)
                     sb.type('input[placeholder="Password"]', pwd)
