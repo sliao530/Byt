@@ -17,6 +17,8 @@ if "DISPLAY" not in os.environ:
             pass
 
 from seleniumbase import SB
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.common.action_chains import ActionChains
 
 # ================= 配置区域 =================
 PROXY = os.getenv("PROXY") or None
@@ -436,6 +438,24 @@ class BytenutRenewal:
                 try:
                     # 登录
                     sb.uc_open_with_reconnect(URL_LOGIN_PANEL, reconnect_time=5)
+                    
+                    # ================= 新增：处理登录页的 CF 盾 =================
+                    self.log("⏳ 等待页面和 CF 盾加载...")
+                    time.sleep(4)
+                    
+                    if self.is_turnstile_present(sb):
+                        self.log("🛡️ 检测到 CF 盾，尝试执行 [Tab x2 + Space] 解锁...")
+                        actions = ActionChains(sb.driver)
+                        actions.send_keys(Keys.TAB) \
+                               .pause(0.5) \
+                               .send_keys(Keys.TAB) \
+                               .pause(0.5) \
+                               .send_keys(Keys.SPACE) \
+                               .perform()
+                        
+                        time.sleep(6)
+                    # ============================================================
+                    
                     sb.wait_for_element_visible('input[placeholder="Username"]', timeout=25)
                     sb.type('input[placeholder="Username"]', user)
                     sb.type('input[placeholder="Password"]', pwd)
