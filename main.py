@@ -437,44 +437,16 @@ class BytenutRenewal:
                     # 登录
                     sb.uc_open_with_reconnect(URL_LOGIN_PANEL, reconnect_time=5)
                     
-                    # ================= 方案二：动态判断 + GUI 点击 =================
-                    self.log("⏳ 正在检查页面状态 (寻找登录框或 CF 盾)...")
+                    # ================= 复用续期时的 CF 盾处理逻辑 =================
+                    self.log("⏳ 等待页面加载，检查登录页 CF 盾...")
+                    time.sleep(3)  # 给 CF 盾 iframe 留出初始加载时间
                     
-                    # 循环检测 5 次，每次 1 秒
-                    cf_detected = False
-                    for _ in range(5):
-                        # 1. 如果直接看到了用户名输入框，说明没有 CF 盾，直接跳出
-                        if sb.is_element_visible('input[placeholder="Username"]'):
-                            break
-                        
-                        # 2. 如果检测到了 CF 盾的特征元素
-                        if self.is_turnstile_present(sb):
-                            cf_detected = True
-                            break
-                            
-                        time.sleep(1)
-                    
-                    if cf_detected:
-                        self.log("🛡️ 检测到 CF 盾，调用 SeleniumBase 原生 GUI 点击...")
-                        try:
-                            # 确保 CF 盾在视口中央，防止点击错位
-                            sb.execute_script("""
-                                var elem = document.querySelector('.cf-turnstile') || document.querySelector('iframe[src*="challenges.cloudflare"]');
-                                if(elem) elem.scrollIntoView({block: 'center'});
-                            """)
-                            time.sleep(1) # 给页面平滑滚动留出时间
-                            
-                            # 触发系统的真实鼠标点击
-                            sb.uc_gui_click_captcha()
-                            
-                            self.log("🖱️ 原生 GUI 点击已执行，等待验证通过...")
-                            time.sleep(6) # 给验证动画和页面跳转留点时间
-                        except Exception as e:
-                            self.log(f"⚠️ GUI 点击出现异常: {e}")
-                    else:
-                        self.log("✅ 未检测到 CF 盾 (或已直接放行)")
-                    # ===============================================================
-                    
+                    # 直接调用原代码中极其完善的 wait_turnstile 函数
+                    # 它内部自带了判断有无盾、滚动居中、循环点击和判断是否通过的完整逻辑
+                    self.wait_turnstile(sb, timeout=45)
+                    # ==============================================================
+
+                    # 无论是否有盾，或者盾通过后，继续执行原有的输入账号密码逻辑
                     sb.wait_for_element_visible('input[placeholder="Username"]', timeout=25)
                     sb.type('input[placeholder="Username"]', user)
                     sb.type('input[placeholder="Password"]', pwd)
