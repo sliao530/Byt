@@ -463,7 +463,7 @@ class BytenutRenewal:
                                .perform()
                         
                         # 给验证动画和页面跳转留点时间
-                        time.sleep(6)
+                        time.sleep(20)
                     else:
                         self.log("✅ 未检测到 CF 盾 (或已直接放行)")
                     # ============================================================
