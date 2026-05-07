@@ -437,10 +437,9 @@ class BytenutRenewal:
 # 登录
                     sb.uc_open_with_reconnect(URL_LOGIN_PANEL, reconnect_time=5)
                     
-                    # ================= 优化版：动态判断 CF 盾 =================
+                    # ================= 优化版：Tab+空格 & 智能等待 =================
                     self.log("⏳ 正在检查页面状态...")
                     
-                    # 循环检测 5 次，每次 1 秒
                     cf_detected = False
                     for _ in range(5):
                         # 1. 如果直接看到了用户名输入框，说明没有 CF 盾，直接跳出
@@ -462,13 +461,31 @@ class BytenutRenewal:
                                .send_keys(Keys.SPACE) \
                                .perform()
                         
-                        # 给验证动画和页面跳转留点时间
-                        time.sleep(20)
+                        # 核心修改：智能等待 CF 盾验证结束
+                        self.log("⏳ 正在等待 CF 盾验证动画完成...")
+                        for _ in range(20):  # 最多等待 20 秒
+                            time.sleep(1)
+                            try:
+                                # 检查 1：获取 CF 的 response token，如果长度大于 20 说明验证通过了
+                                val = sb.execute_script("return document.querySelector(\"input[name='cf-turnstile-response']\")?.value || \"\";")
+                                
+                                # 检查 2：看看 CF 的 iframe 是否还可见 (通常验证完它会折叠或消失)
+                                iframe_visible = sb.execute_script("""
+                                    var el = document.querySelector('iframe[src*="challenges.cloudflare"]'); 
+                                    return el ? (el.offsetWidth > 0 && el.offsetHeight > 0) : false;
+                                """)
+                                
+                                if len(val) > 20 or not iframe_visible:
+                                    self.log("✅ CF 盾验证结束！")
+                                    time.sleep(2)  # 给页面过渡动画留 2 秒缓冲
+                                    break
+                            except Exception:
+                                pass
                     else:
                         self.log("✅ 未检测到 CF 盾 (或已直接放行)")
                     # ============================================================
                     
-                    # 继续原有的登录输入流程
+                    # 此时确保 CF 盾已经处理完毕，再继续输入账号密码
                     sb.wait_for_element_visible('input[placeholder="Username"]', timeout=25)
                     sb.type('input[placeholder="Username"]', user)
                     sb.type('input[placeholder="Password"]', pwd)
