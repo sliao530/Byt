@@ -436,26 +436,41 @@ class BytenutRenewal:
                 proxy=PROXY
             ) as sb:
                 try:
-                    # 登录
+# 登录
                     sb.uc_open_with_reconnect(URL_LOGIN_PANEL, reconnect_time=5)
                     
-                    # ================= 新增：处理登录页的 CF 盾 =================
-                    self.log("⏳ 等待页面和 CF 盾加载...")
-                    time.sleep(4)
+                    # ================= 优化版：动态判断 CF 盾 =================
+                    self.log("⏳ 正在检查页面状态...")
                     
-                    if self.is_turnstile_present(sb):
-                        self.log("🛡️ 检测到 CF 盾，尝试执行 [Tab x2 + Space] 解锁...")
+                    # 循环检测 5 次，每次 1 秒
+                    cf_detected = False
+                    for _ in range(5):
+                        # 1. 如果直接看到了用户名输入框，说明没有 CF 盾，直接跳出
+                        if sb.is_element_visible('input[placeholder="Username"]'):
+                            break
+                        
+                        # 2. 如果检测到了 CF 盾的特征元素
+                        if self.is_turnstile_present(sb):
+                            cf_detected = True
+                            break
+                            
+                        time.sleep(1)
+                    
+                    if cf_detected:
+                        self.log("🛡️ 检测到 CF 盾，执行 [Tab x2 + Space] 解锁...")
                         actions = ActionChains(sb.driver)
                         actions.send_keys(Keys.TAB) \
-                               .pause(0.5) \
-                               .send_keys(Keys.TAB) \
                                .pause(0.5) \
                                .send_keys(Keys.SPACE) \
                                .perform()
                         
+                        # 给验证动画和页面跳转留点时间
                         time.sleep(6)
+                    else:
+                        self.log("✅ 未检测到 CF 盾 (或已直接放行)")
                     # ============================================================
                     
+                    # 继续原有的登录输入流程
                     sb.wait_for_element_visible('input[placeholder="Username"]', timeout=25)
                     sb.type('input[placeholder="Username"]', user)
                     sb.type('input[placeholder="Password"]', pwd)
