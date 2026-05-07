@@ -17,10 +17,6 @@ if "DISPLAY" not in os.environ:
             pass
 
 from seleniumbase import SB
-# ====== 必须增加的导入，否则键盘按键会报错 ======
-from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.common.action_chains import ActionChains
-# ==============================================
 
 # ================= 配置区域 =================
 PROXY = os.getenv("PROXY") or None
@@ -240,12 +236,15 @@ class BytenutRenewal:
         except:
             return False
 
-    def wait_turnstile(self, sb, timeout=60):
+    # 新加了 use_keyboard 参数，默认 False
+    def wait_turnstile(self, sb, timeout=60, use_keyboard=False):
         if not self.is_turnstile_present(sb):
             return True
         self.log("⏳ 等待 Turnstile 验证...")
         start = time.time()
         last_click = 0
+        keyboard_tried = False  
+
         while time.time() - start < timeout:
             self.remove_overlay_ads(sb)
             try:
@@ -264,6 +263,22 @@ class BytenutRenewal:
                     return True
             except:
                 pass
+            
+            # ========== 新加：仅当 use_keyboard=True 且未尝试过时执行 ==========
+            if use_keyboard and not keyboard_tried:
+                try:
+                    self.log("⌨️ 尝试键盘模拟 (Tab + Space)...")
+                    sb.click('body') 
+                    time.sleep(1)
+                    sb.press_keys('body', '\t') # Tab
+                    time.sleep(0.5)
+                    sb.press_keys('body', ' ')  # Space
+                    keyboard_tried = True
+                    time.sleep(2)
+                except:
+                    pass
+            # =======================================================
+
             now = time.time()
             if now - last_click > 3:
                 try:
@@ -348,6 +363,7 @@ class BytenutRenewal:
 
     # ---------- 续期点击与验证 ----------
     def try_extend_and_verify(self, sb, server_id, old_expiry):
+        # 这里的 wait_turnstile 不传 use_keyboard，默认 False，不触发 Tab+Space
         if not self.wait_turnstile(sb):
             return False, ""
 
@@ -413,4 +429,187 @@ class BytenutRenewal:
     def wait_until_not_expired(self, sb, server_id, timeout=120, interval=10):
         deadline = time.time() + timeout
         while time.time() < deadline:
-            ext_info = self.get_extension_data
+            ext_info = self.get_extension_data(sb, server_id)
+            if ext_info:
+                mins = ext_info.get("minutesUntilExpiration", 0)
+                if mins > 0:
+                    return True
+            time.sleep(interval)
+        return False
+
+    def run(self):
+        self.log("🚀 开始执行 ByteNut 续期与开机")
+        accounts = parse_accounts(ACCOUNTS)
+        if not accounts:
+            self.log("❌ 无账号")
+            return
+
+        for idx, (user, pwd) in enumerate(accounts, 1):
+            masked_user = self.mask_account(user)
+            self.log(f"==== 账号 [{idx}] {masked_user} ====")
+
+            with SB(
+                uc=True, test=True, headed=True,
+                chromium_arg="--no-sandbox,--disable-dev-shm-usage,--disable-gpu,--window-size=1280,753",
+                proxy=PROXY
+            ) as sb:
+                try:
+                    # 登录
+                    sb.uc_open_with_reconnect(URL_LOGIN_PANEL, reconnect_time=5)
+                    
+                    # ========== 新加：在进入登录页面时调用验证（开启键盘模拟） ==========
+                    self.wait_turnstile(sb, timeout=30, use_keyboard=True)
+                    # ================================================================
+
+                    sb.wait_for_element_visible('input[placeholder="Username"]', timeout=25)
+                    sb.type('input[placeholder="Username"]', user)
+                    sb.type('input[placeholder="Password"]', pwd)
+                    sb.click('//button[contains(., "Sign In")]')
+                    time.sleep(5)
+                    if "/auth/login" in sb.get_current_url():
+                        err = ""
+                        try:
+                            err = sb.find_element('div.el-form-item__error').text
+                        except:
+                            pass
+                        self.send_tg("❌", "登录失败", user, "未知", "未知", "",
+                                     self.shot(sb, f"login_fail_{idx}.png"))
+                        continue
+                    self.log("✅ 登录成功")
+
+                    sb.uc_open_with_reconnect(URL_HOMEPAGE, reconnect_time=6)
+                    time.sleep(5)
+
+                    servers = self.get_servers_data(sb)
+                    if not servers:
+                        self.send_tg("⚠️", "警告", user, "未知", "未知", "API 请求失败",
+                                     self.shot(sb, f"no_server_{idx}.png"))
+                        continue
+
+                    server = servers[0]
+                    server_id = server.get("id") or ""
+                    server_info = server.get("serverInfo") or {}
+                    state = server_info.get("state", "running")
+                    expired_time = server.get("expiredTime") or ""
+                    expiry_str = self.format_expiry(expired_time)
+                    self.log(f"服务器 {self.mask_server_id(server_id)}: 状态 {state}, 到期 {expiry_str}")
+
+                    if not server_id:
+                        self.send_tg("❌", "失败", user, "未知", state, expiry_str,
+                                     "服务器ID无效", self.shot(sb, f"invalid_id_{idx}.png"))
+                        continue
+
+                    ext_info = self.get_extension_data(sb, server_id)
+                    if not ext_info:
+                        self.send_tg("❌", "失败", user, server_id, state, expiry_str,
+                                     self.shot(sb, f"ext_info_fail_{idx}.png"))
+                        continue
+
+                    can_extend = ext_info.get("canExtend", False)
+                    cooldown_min = ext_info.get("minutesUntilNextExtension", 0)
+                    mins_until_exp = ext_info.get("minutesUntilExpiration", 9999)
+                    expired = mins_until_exp <= 0
+
+                    self.log(f"可续期:{can_extend}, 冷却剩余:{cooldown_min}分, 距离过期:{mins_until_exp}分")
+
+                    # ========== 离线处理 ==========
+                    if state == "offline":
+                        if can_extend:
+                            self.log("🔴 离线，可续期...")
+                            sb.uc_open_with_reconnect(f"https://www.bytenut.com/free-gamepanel/{server_id}", reconnect_time=6)
+                            time.sleep(5)
+                            sb.click(RENEW_MENU)
+                            time.sleep(3)
+                            result, new_time = self.try_extend_and_verify(sb, server_id, expired_time)
+                            if result is True:
+                                if not self.wait_until_not_expired(sb, server_id):
+                                    self.send_tg("⚠️", "续期成功但状态未更新", user, server_id,
+                                                 "offline", expiry_str,
+                                                 "无法开机，请稍后重试",
+                                                 screenshot=self.shot(sb, f"start_fail_{idx}.png"))
+                                    continue
+
+                                if self.api_start_server(sb, server_id):
+                                    is_running, final_state = self.wait_until_running(sb, server_id)
+                                    if is_running:
+                                        self.send_tg("✅", "续期并开机成功", user, server_id,
+                                                     "offline -> running",
+                                                     f"{expiry_str} -> {new_time}",
+                                                     screenshot=self.shot(sb, f"ok_{idx}.png"))
+                                    else:
+                                        self.send_tg("⚠️", "续期成功，开机未确认", user, server_id,
+                                                     f"offline -> {final_state}",
+                                                     new_time,
+                                                     screenshot=self.shot(sb, f"start_timeout_{idx}.png"))
+                                else:
+                                    self.send_tg("✅", "续期成功，开机失败", user, server_id,
+                                                 "offline", new_time,
+                                                 screenshot=self.shot(sb, f"start_fail_{idx}.png"))
+                            elif result == "cooldown":
+                                self.send_tg("⏳", "续期后进入冷却", user, server_id, "offline", expiry_str,
+                                             screenshot=self.shot(sb, f"cooldown_{idx}.png"))
+                            else:
+                                self.send_tg("❌", "续期失败", user, server_id, "offline", expiry_str,
+                                             screenshot=self.shot(sb, f"extend_fail_{idx}.png"))
+                        else:
+                            if expired:
+                                extra = "服务器已过期且处于冷却期，无法续期和开机"
+                                self.send_tg("🚫", "无法操作", user, server_id, state, expiry_str, extra,
+                                             screenshot=self.shot(sb, f"expired_cooldown_{idx}.png"))
+                            else:
+                                self.log("🔴 离线，冷却中，直接开机")
+                                if self.api_start_server(sb, server_id):
+                                    is_running, final_state = self.wait_until_running(sb, server_id)
+                                    if is_running:
+                                        self.send_tg("✅", "冷却中并开机成功", user, server_id,
+                                                     "offline -> running", expiry_str,
+                                                     screenshot=self.shot(sb, f"started_{idx}.png"))
+                                    else:
+                                        self.send_tg("⚠️", "开机请求已发送，未确认运行", user, server_id,
+                                                     f"offline -> {final_state}", expiry_str,
+                                                     screenshot=self.shot(sb, f"start_timeout_{idx}.png"))
+                                else:
+                                    self.send_tg("❌", "开机请求失败", user, server_id, "offline", expiry_str,
+                                                 screenshot=self.shot(sb, f"start_fail_{idx}.png"))
+                        continue
+
+                    # ========== 运行中处理 ==========
+                    if not can_extend:
+                        extra = ""
+                        if expired:
+                            extra = "服务器已过期，但当前处于冷却期，续期被暂时禁止"
+                        self.log(f"⏳ 冷却中 ({cooldown_min}分钟)")
+                        self.send_tg("⏳", "冷却中", user, server_id, state, expiry_str, extra,
+                                     screenshot=self.shot(sb, f"cooldown_{idx}.png"))
+                        continue
+
+                    self.log("✅ 可续期，执行续期")
+                    sb.uc_open_with_reconnect(f"https://www.bytenut.com/free-gamepanel/{server_id}", reconnect_time=6)
+                    time.sleep(5)
+                    sb.click(RENEW_MENU)
+                    time.sleep(3)
+                    result, new_time = self.try_extend_and_verify(sb, server_id, expired_time)
+                    if result is True:
+                        self.send_tg("✅", "续期成功", user, server_id, state,
+                                     f"{expiry_str} -> {new_time}",
+                                     screenshot=self.shot(sb, f"ok_{idx}.png"))
+                    elif result == "cooldown":
+                        self.send_tg("⏳", "续期后进入冷却", user, server_id, state, expiry_str,
+                                     screenshot=self.shot(sb, f"cooldown_{idx}.png"))
+                    else:
+                        self.send_tg("❌", "续期失败", user, server_id, state, expiry_str,
+                                     screenshot=self.shot(sb, f"extend_fail_{idx}.png"))
+
+                except Exception as e:
+                    self.log(f"❌ 异常: {e}")
+                    try:
+                        self.send_tg("❌", "异常", user, "未知", "未知", str(e),
+                                     screenshot=self.shot(sb, f"error_{idx}.png"))
+                    except:
+                        self.send_tg("❌", "异常", user, "未知", "未知", str(e))
+
+        self.log("✅ 所有账号处理完毕")
+
+
+if __name__ == "__main__":
+    BytenutRenewal().run()
