@@ -127,12 +127,12 @@ class BytenutRenewal:
         var token = localStorage.getItem('yl-token')
                  || sessionStorage.getItem('yl-token') || '';
         var headers = {{
-            'Accept': 'application/json, text/plain, */*'，
+            'Accept': 'application/json, text/plain, */*',
             'Referer': {referer_js}
         }};
         if (token) {{ headers['Yl-Token'] = token; }}
-        fetch({url_js}， {{
-            method: {method_js}，
+        fetch({url_js}, {{
+            method: {method_js},
             headers: headers,
             credentials: 'include'
         }})
